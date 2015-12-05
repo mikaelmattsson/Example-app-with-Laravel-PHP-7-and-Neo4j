@@ -1,0 +1,1 @@
+{"nfs":{"core":{"id":"core","nfs":true,"mount_options":["nolock,vers=3,udp,noatime,actimeo=2"],"guestpath":"/vagrant","hostpath":"/Users/mikael/Sites/laravel/shop","disabled":false,"type":"nfs","map_uid":501,"map_gid":20,"nfs_udp":true,"nfs_version":3,"uuid":"4111740132"}}}
