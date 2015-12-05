@@ -1,8 +1,7 @@
 <?php
 
 use Illuminate\Database\Seeder;
-use Illuminate\Database\Eloquent\Model;
-use NeoShop\Model\Product;
+use NeoShop\Entity\Product\Product;
 use Vinelab\NeoEloquent\Facade\Neo4jSchema;
 
 class ProductSeeder extends Seeder
