@@ -3,6 +3,7 @@
 namespace NeoShop\Entity\Base;
 
 use Illuminate\Container\Container as App;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use NeoShop\Entity\Base\Exception\RepositoryException;
 use Vinelab\NeoEloquent\Eloquent\Builder;
@@ -18,7 +19,7 @@ abstract class Repository implements RepositoryInterface
     /**
      * @var Builder
      */
-    protected $model;
+    protected $builder;
 
     /**
      * @param App $app
@@ -28,7 +29,7 @@ abstract class Repository implements RepositoryInterface
     public function __construct(App $app)
     {
         $this->app = $app;
-        $this->makeModel();
+        $this->makeBuilder();
     }
 
     /**
@@ -43,28 +44,32 @@ abstract class Repository implements RepositoryInterface
      */
     public function all($columns = ['*']) : Collection
     {
-        return $this->model->get($columns);
+        return $this->builder->get($columns);
     }
 
     /**
      * @param int   $perPage
      * @param array $columns
      *
-     * @return mixed
+     * @return LengthAwarePaginator
      */
-    public function paginate($perPage = 15, $columns = ['*'])
+    public function paginate($perPage = 15, $columns = ['*']) : LengthAwarePaginator
     {
-        return $this->model->paginate($perPage, $columns);
+        return $this->builder->paginate($perPage, $columns);
     }
 
     /**
      * @param array $data
      *
-     * @return mixed
+     * @return Model
      */
-    public function create(array $data)
+    public function create(array $data) : Model
     {
-        return $this->model->create($data);
+        /** @var Model $model */
+        $model = $this->app->make($this->model());
+        $model->update($data);
+
+        return $model;
     }
 
     /**
@@ -76,7 +81,7 @@ abstract class Repository implements RepositoryInterface
      */
     public function update(array $data, $id, $attribute = "id")
     {
-        return $this->model->where($attribute, '=', $id)->update($data);
+        return $this->builder->where($attribute, '=', $id)->update($data);
     }
 
     /**
@@ -86,18 +91,18 @@ abstract class Repository implements RepositoryInterface
      */
     public function delete($id)
     {
-        return $this->model->destroy($id);
+        return $this->builder->find($id)->delete();
     }
 
     /**
      * @param       $id
      * @param array $columns
      *
-     * @return Model|null
+     * @return Collection
      */
-    public function find($id, $columns = ['*'])
+    public function find($id, $columns = ['*']) : Collection
     {
-        return $this->model->find($id, $columns);
+        return $this->builder->find($id, $columns);
     }
 
     /**
@@ -109,14 +114,14 @@ abstract class Repository implements RepositoryInterface
      */
     public function findBy($attribute, $value, $columns = ['*'])
     {
-        return $this->model->where($attribute, '=', $value)->first($columns);
+        return $this->builder->where($attribute, '=', $value)->first($columns);
     }
 
     /**
      * @return Builder
      * @throws RepositoryException
      */
-    public function makeModel() : Builder
+    public function makeBuilder() : Builder
     {
         $model = $this->app->make($this->model());
 
@@ -124,6 +129,6 @@ abstract class Repository implements RepositoryInterface
             throw new RepositoryException("Class {$this->model()} must be an instance of " . Model::class);
         }
 
-        return $this->model = $model->newQuery();
+        return $this->builder = $model->newQuery();
     }
 }
