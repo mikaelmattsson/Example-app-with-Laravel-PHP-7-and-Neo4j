@@ -16,6 +16,7 @@ github_pat          = ""
 hostname        = "neoshop.dev"
 
 server_ip             = "192.168.22.10"
+server_test_ip        = "192.168.22.11"
 server_cpus           = "1"   # Cores
 server_memory         = "384" # MB
 server_swap           = "768" # Options: false | int (MB) - Guideline: Between one or two times the server_memory
@@ -61,9 +62,6 @@ Vagrant.configure("2") do |config|
   # Set server to Ubuntu 14.04
   config.vm.box = "ubuntu/trusty64"
 
-  config.vm.define "Vaprobash" do |vapro|
-  end
-
   if Vagrant.has_plugin?("vagrant-hostmanager")
     config.hostmanager.enabled = true
     config.hostmanager.manage_host = true
@@ -71,147 +69,176 @@ Vagrant.configure("2") do |config|
     config.hostmanager.include_offline = false
   end
 
-  # Create a hostname, don't forget to put it to the `hosts` file
-  # This will point to the server's default virtual host
-  # TO DO: Make this work with virtualhost along-side xip.io URL
-  config.vm.hostname = hostname
+  config.vm.define :default do |default|
 
-  # Create a static IP
-  config.vm.network :private_network, ip: server_ip
-  config.vm.network :forwarded_port, guest: 80, host: 8000
-  config.vm.network :forwarded_port, guest: 7474, host: 7475
+    # Create a hostname, don't forget to put it to the `hosts` file
+    # This will point to the server's default virtual host
+    # TO DO: Make this work with virtualhost along-side xip.io URL
+    default.vm.hostname = hostname
 
-  # Enable agent forwarding over SSH connections
-  config.ssh.forward_agent = true
+    # Create a static IP
+    default.vm.network :private_network, ip: server_ip
 
-  # Use NFS for the shared folder
-  config.vm.synced_folder ".", "/vagrant/",
-            id: "core",
-            :nfs => true,
-            :mount_options => ['nolock,vers=3,udp,noatime,actimeo=2']
+    #default.vm.network :forwarded_port, guest: 80, host: 8000
+    #default.vm.network :forwarded_port, guest: 7474, host: 7475
 
-  # Replicate local .gitconfig file if it exists
-  if File.file?(File.expand_path("~/.gitconfig"))
-    config.vm.provision "file", source: "~/.gitconfig", destination: ".gitconfig"
+    # Enable agent forwarding over SSH connections
+    default.ssh.forward_agent = true
+
+    # Use NFS for the shared folder
+    default.vm.synced_folder ".", "/vagrant/",
+              id: "core",
+              :nfs => true,
+              :mount_options => ['nolock,vers=3,udp,noatime,actimeo=2']
+
+    # Replicate local .gitconfig file if it exists
+    if File.file?(File.expand_path("~/.gitconfig"))
+      config.vm.provision "file", source: "~/.gitconfig", destination: ".gitconfig"
+    end
+
+    # If using VirtualBox
+    config.vm.provider :virtualbox do |vb|
+
+      vb.name = hostname
+
+      # Set server cpus
+      vb.customize ["modifyvm", :id, "--cpus", server_cpus]
+
+      # Set server memory
+      vb.customize ["modifyvm", :id, "--memory", server_memory]
+
+      # Set the timesync threshold to 10 seconds, instead of the default 20 minutes.
+      # If the clock gets more than 15 minutes out of sync (due to your laptop going
+      # to sleep for instance, then some 3rd party services will reject requests.
+      vb.customize ["guestproperty", "set", :id, "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000]
+
+      # Prevent VMs running on Ubuntu to lose internet connection
+      # vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      # vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+
+    end
+
+    # If using VMWare Fusion
+    config.vm.provider "vmware_fusion" do |vb, override|
+      override.vm.box_url = "http://files.vagrantup.com/precise64_vmware.box"
+
+      # Set server memory
+      vb.vmx["memsize"] = server_memory
+
+    end
+
+    # If using Vagrant-Cachier
+    # http://fgrehm.viewdocs.io/vagrant-cachier
+    if Vagrant.has_plugin?("vagrant-cachier")
+      # Configure cached packages to be shared between instances of the same base box.
+      # Usage docs: http://fgrehm.viewdocs.io/vagrant-cachier/usage
+      config.cache.scope = :box
+
+      config.cache.synced_folder_opts = {
+          type: :nfs,
+          mount_options: ['rw', 'vers=3', 'tcp', 'nolock']
+      }
+    end
+
+    # Adding vagrant-digitalocean provider - https://github.com/smdahlen/vagrant-digitalocean
+    # Needs to ensure that the vagrant plugin is installed
+    config.vm.provider :digital_ocean do |provider, override|
+      override.ssh.private_key_path = '~/.ssh/id_rsa'
+      override.ssh.username = 'vagrant'
+      override.vm.box = 'digital_ocean'
+      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+
+      provider.token = 'YOUR TOKEN'
+      provider.image = 'ubuntu-14-04-x64'
+      provider.region = 'nyc2'
+      provider.size = '512mb'
+    end
+
+    ####
+    # Base Items
+    ##########
+
+    # Provision Base Packages
+    default.vm.provision "shell", path: "#{github_url}/scripts/base.sh", args: [github_url, server_swap, server_timezone]
+
+    # optimize base box
+    default.vm.provision "shell", path: "#{github_url}/scripts/base_box_optimizations.sh", privileged: true
+
+    # Provision PHP
+    default.vm.provision "shell", path: "#{github_url}/scripts/php.sh", args: [php_timezone, hhvm, php_version]
+
+    ####
+    # Web Servers
+    ##########
+
+    # Provision Apache Base
+    # default.vm.provision "shell", path: "#{github_url}/scripts/apache.sh", args: [server_ip, public_folder, hostname, github_url]
+
+    # Provision Nginx Base
+    default.vm.provision "shell", path: "#{github_url}/scripts/nginx.sh", args: [server_ip, public_folder, hostname, github_url]
+
+
+    ####
+    # Databases
+    ##########
+
+    # Provision Neo4J
+    default.vm.provision "shell", path: "#{github_url}/scripts/neo4j.sh"
+
+
+    ####
+    # In-Memory Stores
+    ##########
+
+    # Provision Redis (without journaling and persistence)
+    # default.vm.provision "shell", path: "#{github_url}/scripts/redis.sh"
+
+    ####
+    # Additional Languages
+    ##########
+
+    # Install Nodejs
+    # default.vm.provision "shell", path: "#{github_url}/scripts/nodejs.sh", privileged: false, args: nodejs_packages.unshift(nodejs_version, github_url)
+
+    ####
+    # Frameworks and Tooling
+    ##########
+
+    # Provision Composer
+    # You may pass a github auth token as the first argument
+    default.vm.provision "shell", path: "#{github_url}/scripts/composer.sh", privileged: false, args: [github_pat, composer_packages.join(" ")]
+
+    ####
+    # Local Scripts
+    # Any local scripts you may want to run post-provisioning.
+    # Add these to the same directory as the Vagrantfile.
+    ##########
+    config.vm.provision "shell", path: "./local-scripts.sh"
+
   end
 
-  # If using VirtualBox
-  config.vm.provider :virtualbox do |vb|
+  ## Test box
+  config.vm.define :test do |test|
 
-    vb.name = hostname
+    test.vm.provider :virtualbox do |vb|
+      vb.name = "test." + hostname
+    end
 
-    # Set server cpus
-    vb.customize ["modifyvm", :id, "--cpus", server_cpus]
+    test.vm.box = "ubuntu/trusty64"
+    test.vm.hostname = "test." + hostname
 
-    # Set server memory
-    vb.customize ["modifyvm", :id, "--memory", server_memory]
+    # Create a static IP
+    test.vm.network :private_network, ip: server_test_ip
 
-    # Set the timesync threshold to 10 seconds, instead of the default 20 minutes.
-    # If the clock gets more than 15 minutes out of sync (due to your laptop going
-    # to sleep for instance, then some 3rd party services will reject requests.
-    vb.customize ["guestproperty", "set", :id, "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000]
+    test.vm.provision "shell", path: "#{github_url}/scripts/neo4j.sh"
 
-    # Prevent VMs running on Ubuntu to lose internet connection
-    # vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
-    # vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+    test.vm.provision "shell", inline: "sudo sed -i -e 's/#org.neo4j.server.webserver.address=0.0.0.0/org.neo4j.server.webserver.address=0.0.0.0/' /etc/neo4j/neo4j-server.properties"
+    test.vm.provision "shell", inline: "sudo service neo4j-service restart"
 
-  end
-
-  # If using VMWare Fusion
-  config.vm.provider "vmware_fusion" do |vb, override|
-    override.vm.box_url = "http://files.vagrantup.com/precise64_vmware.box"
-
-    # Set server memory
-    vb.vmx["memsize"] = server_memory
+    test.vm.provider "virtualbox" do |vb|
+        vb.customize ["modifyvm", :id, "--memory", "1024", "--cpus", "2", "--ioapic", "on"]
+    end
 
   end
-
-  # If using Vagrant-Cachier
-  # http://fgrehm.viewdocs.io/vagrant-cachier
-  if Vagrant.has_plugin?("vagrant-cachier")
-    # Configure cached packages to be shared between instances of the same base box.
-    # Usage docs: http://fgrehm.viewdocs.io/vagrant-cachier/usage
-    config.cache.scope = :box
-
-    config.cache.synced_folder_opts = {
-        type: :nfs,
-        mount_options: ['rw', 'vers=3', 'tcp', 'nolock']
-    }
-  end
-
-  # Adding vagrant-digitalocean provider - https://github.com/smdahlen/vagrant-digitalocean
-  # Needs to ensure that the vagrant plugin is installed
-  config.vm.provider :digital_ocean do |provider, override|
-    override.ssh.private_key_path = '~/.ssh/id_rsa'
-    override.ssh.username = 'vagrant'
-    override.vm.box = 'digital_ocean'
-    override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
-
-    provider.token = 'YOUR TOKEN'
-    provider.image = 'ubuntu-14-04-x64'
-    provider.region = 'nyc2'
-    provider.size = '512mb'
-  end
-
-  ####
-  # Base Items
-  ##########
-
-  # Provision Base Packages
-  config.vm.provision "shell", path: "#{github_url}/scripts/base.sh", args: [github_url, server_swap, server_timezone]
-
-  # optimize base box
-  config.vm.provision "shell", path: "#{github_url}/scripts/base_box_optimizations.sh", privileged: true
-
-  # Provision PHP
-  config.vm.provision "shell", path: "#{github_url}/scripts/php.sh", args: [php_timezone, hhvm, php_version]
-
-  ####
-  # Web Servers
-  ##########
-
-  # Provision Apache Base
-  # config.vm.provision "shell", path: "#{github_url}/scripts/apache.sh", args: [server_ip, public_folder, hostname, github_url]
-
-  # Provision Nginx Base
-  config.vm.provision "shell", path: "#{github_url}/scripts/nginx.sh", args: [server_ip, public_folder, hostname, github_url]
-
-
-  ####
-  # Databases
-  ##########
-
-  # Provision Neo4J
-  config.vm.provision "shell", path: "#{github_url}/scripts/neo4j.sh"
-
-
-  ####
-  # In-Memory Stores
-  ##########
-
-  # Provision Redis (without journaling and persistence)
-  # config.vm.provision "shell", path: "#{github_url}/scripts/redis.sh"
-
-  ####
-  # Additional Languages
-  ##########
-
-  # Install Nodejs
-  # config.vm.provision "shell", path: "#{github_url}/scripts/nodejs.sh", privileged: false, args: nodejs_packages.unshift(nodejs_version, github_url)
-
-  ####
-  # Frameworks and Tooling
-  ##########
-
-  # Provision Composer
-  # You may pass a github auth token as the first argument
-  config.vm.provision "shell", path: "#{github_url}/scripts/composer.sh", privileged: false, args: [github_pat, composer_packages.join(" ")]
-
-  ####
-  # Local Scripts
-  # Any local scripts you may want to run post-provisioning.
-  # Add these to the same directory as the Vagrantfile.
-  ##########
-  # config.vm.provision "shell", path: "./local-script.sh"
 
 end
